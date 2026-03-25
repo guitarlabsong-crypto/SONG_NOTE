@@ -6,48 +6,41 @@
     <title>Live Recording Score - SYMGuitarLab</title>
     <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
     <style>
-        :root { --navy: #000080; --red: #c0392b; --gold: #f39c12; --bg: #f4f7f6; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
+        :root { --navy: #000080; --red: #c0392b; --bg: #f8f9fa; }
+        body { font-family: sans-serif; margin: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; overflow-x: hidden; touch-action: manipulation; }
         
-        /* 워터마크: 절대 줄이지 않음 */
-        #watermark { position: fixed; top: 25px; right: 30px; font-size: 1.5rem; font-weight: 900; color: rgba(0,0,0,0.1); z-index: 1000; pointer-events: none; text-transform: uppercase; }
+        /* 워터마크 고정 */
+        #watermark { position: fixed; top: 15px; right: 15px; font-size: 0.9rem; font-weight: 900; color: rgba(0,0,0,0.1); z-index: 1000; pointer-events: none; }
         
-        header { width: 100%; background: white; padding: 25px 0; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); z-index: 100; }
-        h1 { color: #2c3e50; margin: 0 0 15px 0; font-size: 1.8rem; }
+        header { width: 100%; background: white; padding: 15px 0; text-align: center; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 200; }
+        h1 { font-size: 1.2rem; margin: 5px 0; color: #333; }
 
-        /* 컨트롤 영역 */
-        .controls { display: flex; gap: 15px; justify-content: center; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-        .big-btn { padding: 15px 35px; font-size: 1.3rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; transition: 0.2s; }
+        /* 스마트폰 맞춤형 컨트롤 (비율 조정) */
+        .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 95%; margin: 10px auto; }
+        .big-btn { flex: 1; min-width: 80px; padding: 12px 0; font-size: 1rem; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; color: white; }
         #rec-btn { background: var(--navy); }
         #stop-btn { background: var(--red); display: none; }
-        #del-btn { background: #7f8c8d; }
+        #del-btn { background: #666; }
         
-        .settings { font-size: 1.1rem; display: flex; gap: 15px; align-items: center; color: #555; }
-        input, select { padding: 8px; border-radius: 5px; border: 1px solid #ccc; font-size: 1rem; }
+        .settings { width: 100%; display: flex; justify-content: center; gap: 15px; margin-bottom: 10px; font-size: 0.9rem; }
+        input, select { padding: 5px; border: 1px solid #ccc; border-radius: 4px; }
 
-        /* 악보 컨테이너 */
+        /* 악보 컨테이너 (스마트폰 가로폭 95% 비율) */
         #score-wrapper { 
-            position: relative; width: 95%; max-width: 1300px; background: white; 
-            margin: 25px; padding: 50px 30px; border-radius: 15px; min-height: 600px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05); overflow: hidden;
+            position: relative; width: 95%; background: white; 
+            margin: 10px auto; border-radius: 8px; min-height: 400px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;
         }
         
-        /* 플레이헤드: 오선지 높이만큼 */
-        #playhead {
-            position: absolute; width: 3px; height: 140px; /* 오선지 높이 근사치 */
-            background: rgba(255, 0, 0, 0.7); z-index: 50; display: none; pointer-events: none;
-        }
+        #score-render-area { width: 100%; }
 
-        /* 플레이헤드 추적 LED */
-        #follower-led {
-            position: absolute; width: 30px; height: 10px; border-radius: 5px;
-            background: #ddd; top: -15px; left: -13px; /* 헤더 바로 위에 위치 */
-            transition: background 0.05s; z-index: 60;
-        }
-        #follower-led.active { background: #00ff00; box-shadow: 0 0 10px #00ff00; }
-        #follower-led.downbeat { background: #ff00ff; box-shadow: 0 0 10px #ff00ff; }
+        /* 플레이헤드 & LED */
+        #playhead { position: absolute; width: 2px; height: 120px; background: rgba(255, 0, 0, 0.8); z-index: 50; display: none; }
+        #follower-led { position: absolute; width: 20px; height: 6px; border-radius: 3px; background: #ddd; top: -10px; left: -9px; }
+        #follower-led.active { background: #00ff00; box-shadow: 0 0 8px #00ff00; }
+        #follower-led.downbeat { background: #ff00ff; box-shadow: 0 0 8px #ff00ff; }
 
-        #status { font-size: 1.1rem; font-weight: bold; color: var(--red); margin-top: 10px; height: 1.5rem; }
+        #status { font-size: 0.9rem; font-weight: bold; color: var(--red); height: 1.2rem; margin-bottom: 5px; }
     </style>
 </head>
 <body>
@@ -56,26 +49,25 @@
 
     <header>
         <h1>Live Recording Score</h1>
-        <div class="controls">
-            <div class="settings">
-                BPM <input type="number" id="bpm-input" value="80" style="width:60px;">
-                박자 
+        <div id="status">연주 준비</div>
+        <div class="settings">
+            <span>BPM <input type="number" id="bpm-input" value="80" style="width:45px;"></span>
+            <span>박자 
                 <select id="time-sig">
                     <option value="4/4">4/4</option>
                     <option value="3/4">3/4</option>
                 </select>
-            </div>
+            </span>
+        </div>
+        <div class="controls">
             <button id="rec-btn" class="big-btn" onclick="startRecording()">RECORD</button>
             <button id="stop-btn" class="big-btn" onclick="stopRecording()">STOP</button>
-            <button id="del-btn" class="big-btn" onclick="deleteLast()">지우기 (←)</button>
+            <button id="del-btn" class="big-btn" onclick="deleteLast()">지우기</button>
         </div>
-        <div id="status">연주 준비</div>
     </header>
 
     <div id="score-wrapper">
-        <div id="playhead">
-            <div id="follower-led"></div>
-        </div>
+        <div id="playhead"><div id="follower-led"></div></div>
         <div id="score-render-area"></div>
     </div>
 
@@ -85,27 +77,26 @@
         let recordedNotes = [];
         let startTime, preCountActive = false;
         const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-        const STAVE_WIDTH = 300;
-        const MEASURES_PER_LINE = 4;
+        
+        // 스마트폰 화면 비율에 따른 마디 너비 계산
+        let STAVE_WIDTH = window.innerWidth * 0.42; 
+        const MEASURES_PER_LINE = 2; // 모바일은 한 줄에 2마디가 가장 적합
 
         async function startRecording() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
                 audioCtx.createMediaStreamSource(stream).connect(analyser);
             }
-            
             bpm = document.getElementById('bpm-input').value;
             beatSec = 60 / bpm;
             timeSigNum = parseInt(document.getElementById('time-sig').value.split('/')[0]);
-            
-            isRecording = true;
-            preCountActive = true;
+            isRecording = true; preCountActive = true;
             document.getElementById('rec-btn').style.display = 'none';
             document.getElementById('stop-btn').style.display = 'inline-block';
             document.getElementById('playhead').style.display = 'block';
-
             startTime = audioCtx.currentTime;
             requestAnimationFrame(updateLoop);
         }
@@ -115,125 +106,93 @@
             document.getElementById('rec-btn').style.display = 'inline-block';
             document.getElementById('stop-btn').style.display = 'none';
             document.getElementById('playhead').style.display = 'none';
-            document.getElementById('status').innerText = "녹음 종료";
         }
 
         let lastPitch = -1, noteStartBeat = 0;
 
         function updateLoop() {
             if (!isRecording) return;
-
             const elapsed = audioCtx.currentTime - startTime;
             const totalBeats = elapsed / beatSec;
             
-            // 1. 예비박 로직 (첫 1마디 무시)
             if (preCountActive) {
-                const preCountBeat = Math.floor(totalBeats) + 1;
-                document.getElementById('status').innerText = `READY: ${preCountBeat}`;
-                
-                // 플레이헤드 위치는 첫 마디에 고정하고 LED만 깜빡임
-                updatePlayheadUI(0); 
-                updateLED(totalBeats);
-
+                document.getElementById('status').innerText = `READY: ${Math.floor(totalBeats)+1}`;
+                updatePlayheadUI(0); updateLED(totalBeats);
                 if (totalBeats >= timeSigNum) {
-                    preCountActive = false;
-                    startTime = audioCtx.currentTime; // 녹음 시작 시점 재설정 (예비박 제외)
-                    document.getElementById('status').innerText = "RECORDING...";
+                    preCountActive = false; startTime = audioCtx.currentTime;
+                    document.getElementById('status').innerText = "REC ON";
                 }
             } else {
-                // 2. 실제 녹음 로직
-                updatePlayheadUI(totalBeats);
-                updateLED(totalBeats);
+                updatePlayheadUI(totalBeats); updateLED(totalBeats);
                 analyzeAudio(totalBeats);
             }
-
             requestAnimationFrame(updateLoop);
         }
 
         function updatePlayheadUI(beat) {
             const head = document.getElementById('playhead');
-            const measureIdx = Math.floor(beat / timeSigNum);
-            const beatInMeasure = beat % timeSigNum;
-            const line = Math.floor(measureIdx / MEASURES_PER_LINE);
-            const col = measureIdx % MEASURES_PER_LINE;
-
-            const x = 50 + (col * STAVE_WIDTH) + (beatInMeasure / timeSigNum * STAVE_WIDTH);
-            const y = 50 + (line * 180); // 줄 간격
-
-            head.style.left = `${x}px`;
-            head.style.top = `${y}px`;
+            const mIdx = Math.floor(beat / timeSigNum);
+            const line = Math.floor(mIdx / MEASURES_PER_LINE);
+            const col = mIdx % MEASURES_PER_LINE;
+            const x = 35 + (col * STAVE_WIDTH) + ((beat % timeSigNum) / timeSigNum * STAVE_WIDTH);
+            const y = 30 + (line * 130);
+            head.style.left = `${x}px`; head.style.top = `${y}px`;
         }
 
         function updateLED(beat) {
             const led = document.getElementById('follower-led');
-            const beatDecimal = beat % 1;
-            const beatInt = Math.floor(beat % timeSigNum);
-            
-            // 박자 경계에서 반짝임
-            if (beatDecimal < 0.15) {
-                led.classList.add(beatInt === 0 ? 'downbeat' : 'active');
-            } else {
-                led.classList.remove('active', 'downbeat');
-            }
+            const bDec = beat % 1;
+            if (bDec < 0.2) {
+                led.classList.add(Math.floor(beat % timeSigNum) === 0 ? 'downbeat' : 'active');
+            } else { led.classList.remove('active', 'downbeat'); }
         }
 
+        // --- 정밀 튜너 알고리즘 (Autocorrelation) ---
         function analyzeAudio(currentBeat) {
             const buffer = new Float32Array(analyser.fftSize);
             analyser.getFloatTimeDomainData(buffer);
             const freq = autoCorrelate(buffer, audioCtx.sampleRate);
 
-            if (freq !== -1) {
+            if (freq !== -1 && freq > 60 && freq < 1200) { // 목소리/기타 유효 범위
                 if (lastPitch === -1) {
-                    noteStartBeat = Math.round(currentBeat * 2) / 2; // 8분음표 퀀타이즈
+                    noteStartBeat = Math.round(currentBeat * 2) / 2;
                     lastPitch = getNoteFromFreq(freq);
                 }
             } else if (lastPitch !== -1) {
                 const noteEndBeat = Math.round(currentBeat * 2) / 2;
                 const duration = noteEndBeat - noteStartBeat;
-                if (duration >= 0.5) addNote(lastPitch, noteStartBeat, duration);
+                if (duration >= 0.5) {
+                    recordedNotes.push({ ...lastPitch, startBeat: noteStartBeat, type: (duration < 0.75 ? "8" : "q") });
+                    drawScore();
+                }
                 lastPitch = -1;
             }
         }
-
-        function addNote(pitch, startBeat, duration) {
-            // 4분음표(q), 8분음표(8) 제한
-            let type = (duration < 0.75) ? "8" : "q";
-            recordedNotes.push({ ...pitch, startBeat, type });
-            drawScore();
-        }
-
-        function deleteLast() { recordedNotes.pop(); drawScore(); }
-        window.addEventListener('keydown', e => { if(e.key === "ArrowLeft") deleteLast(); });
 
         function drawScore() {
             const area = document.getElementById('score-render-area');
             area.innerHTML = "";
             const VF = Vex.Flow;
             const renderer = new VF.Renderer(area, VF.Renderer.Backends.SVG);
-            
             let measures = [];
             recordedNotes.forEach(n => {
                 const mIdx = Math.floor(n.startBeat / timeSigNum);
                 if(!measures[mIdx]) measures[mIdx] = [];
                 measures[mIdx].push(n);
             });
-
-            // 현재 진행중인 마디까지 미리 그려둠
-            const currentBeat = isRecording && !preCountActive ? (audioCtx.currentTime - startTime) / beatSec : 0;
-            const totalMeasures = Math.max(measures.length, Math.floor(currentBeat / timeSigNum) + 1);
+            const totalMeasures = Math.max(measures.length, Math.floor((isRecording? (audioCtx.currentTime-startTime)/beatSec : 0)/timeSigNum)+1);
             const totalRows = Math.ceil(totalMeasures / MEASURES_PER_LINE);
-            
-            renderer.resize(1250, totalRows * 180 + 100);
+            renderer.resize(window.innerWidth * 0.95, totalRows * 130 + 60);
             const ctx = renderer.getContext();
+            ctx.scale(0.9, 0.9); // 모바일 시인성을 위해 약간 축소
 
             for (let i = 0; i < totalMeasures; i++) {
                 const row = Math.floor(i / MEASURES_PER_LINE);
                 const col = i % MEASURES_PER_LINE;
-                const stave = new VF.Stave(col * STAVE_WIDTH + 50, row * 180 + 50, STAVE_WIDTH);
+                const stave = new VF.Stave(col * STAVE_WIDTH + 30, row * 130 + 30, STAVE_WIDTH);
                 if (col === 0) stave.addClef("treble");
                 if (i === 0) stave.addTimeSignature(document.getElementById('time-sig').value);
                 stave.setContext(ctx).draw();
-
                 if (measures[i]) {
                     const vfNotes = measures[i].map(d => {
                         const sn = new VF.StaveNote({ keys: [`${d.key}/${d.octave}`], duration: d.type });
@@ -242,7 +201,7 @@
                     });
                     const voice = new VF.Voice({ num_beats: timeSigNum, beat_value: 4 }).setStrict(false);
                     voice.addTickables(vfNotes);
-                    new VF.Formatter().joinVoices([voice]).format([voice], STAVE_WIDTH - 60);
+                    new VF.Formatter().joinVoices([voice]).format([voice], STAVE_WIDTH - 50);
                     voice.draw(ctx, stave);
                 }
             }
@@ -251,19 +210,27 @@
         function getNoteFromFreq(freq) {
             const num = 12 * (Math.log2(freq / 440)) + 69;
             const rnd = Math.round(num);
-            return { key: noteNames[rnd % 12].replace('#',''), octave: Math.floor(rnd / 12) + 1, accidental: noteNames[rnd % 12].includes('#') ? '#' : null };
+            let octave = Math.floor(rnd / 12) - 1;
+            // 튜너기 정밀도 보정: 목소리는 한 옥타브 올려서 표기해야 오선지에 예쁘게 나옴
+            if (octave < 4) octave += 1; 
+            return { key: noteNames[rnd % 12].replace('#',''), octave, accidental: noteNames[rnd % 12].includes('#') ? '#' : null };
         }
 
         function autoCorrelate(buf, sampleRate) {
-            let rms = 0; for (let i=0; i<buf.length; i++) rms += buf[i]*buf[i];
-            if (Math.sqrt(rms/buf.length) < 0.02) return -1;
-            let c = new Array(buf.length).fill(0);
-            for (let i=0; i<buf.length; i++) for (let j=0; j<buf.length-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
+            let SIZE = buf.length; let rms = 0;
+            for (let i=0; i<SIZE; i++) rms += buf[i]*buf[i];
+            if (Math.sqrt(rms/SIZE) < 0.015) return -1; // 노이즈 게이트
+
+            let c = new Array(SIZE).fill(0);
+            for (let i=0; i<SIZE; i++)
+                for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i];
             let d=0; while (c[d]>c[d+1]) d++;
             let maxv=-1, maxp=-1;
-            for (let i=d; i<buf.length; i++) if (c[i] > maxv) { maxv = c[i]; maxp = i; }
+            for (let i=d; i<SIZE; i++) if (c[i] > maxv) { maxv = c[i]; maxp = i; }
             return sampleRate/maxp;
         }
+
+        function deleteLast() { recordedNotes.pop(); drawScore(); }
     </script>
 </body>
 </html>
