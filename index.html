@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 실시간 채보 시스템</title>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #f4f4f4; }
+        #output { font-size: 2rem; color: #333; margin: 20px; font-weight: bold; }
+        #score { background: white; display: inline-block; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; font-size: 1.2rem; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>실시간 기타/보컬 악보 변환기</h1>
+    <button onclick="startAudio()">마이크 시작</button>
+    <div id="output">준비됨</div>
+    <div id="score"></div>
+
+    <script>
+        let audioContext;
+        let analyser;
+        const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+        function startAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                drawScore("C/4"); // 초기 화면
+                updatePitch();
+            });
+        }
+
+        function updatePitch() {
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            
+            // 단순 피치 검출 알고리즘 (Autocorrelation)
+            const pitch = autoCorrelate(buffer, audioContext.sampleRate);
+
+            if (pitch !== -1) {
+                const noteInfo = getNoteFromFreq(pitch);
+                document.getElementById('output').innerText = `인식된 음: ${noteInfo.name}${noteInfo.octave}`;
+                drawScore(`${noteInfo.name}/${noteInfo.octave}`);
+            }
+            requestAnimationFrame(updatePitch);
+        }
+
+        // 주파수를 음이름과 옥타브로 변환
+        function getNoteFromFreq(freq) {
+            const number = 12 * (Math.log2(freq / 440)) + 69;
+            const index = Math.round(number) % 12;
+            const octave = Math.floor(Math.round(number) / 12) - 1;
+            return { name: noteNames[index], octave: octave };
+        }
+
+        // VexFlow를 이용한 악보 그리기
+        function drawScore(noteKey) {
+            const div = document.getElementById("score");
+            div.innerHTML = ""; // 이전 악보 삭제
+            
+            const renderer = new Vex.Flow.Renderer(div, Vex.Flow.Renderer.Backends.SVG);
+            renderer.resize(200, 200);
+            const context = renderer.getContext();
+            const stave = new Vex.Flow.Stave(10, 40, 150);
+            stave.addClef("treble").setContext(context).draw();
+
+            // 샵(#) 처리 logic
+            const note = new Vex.Flow.StaveNote({ keys: [noteKey], duration: "q" });
+            if (noteKey.includes("#")) {
+                note.addModifier(new Vex.Flow.Accidental("#"));
+            }
+
+            const voice = new Vex.Flow.Voice({ num_beats: 1, beat_value: 4 });
+            voice.addTickables([note]);
+            new Vex.Flow.Formatter().joinVoices([voice]).format([voice], 100);
+            voice.draw(context, stave);
+        }
+
+        // 단순 자기상관 함수 (피치 검출용)
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let rms = 0;
+            for (let i=0; i<SIZE; i++) rms += buf[i]*buf[i];
+            if (Math.sqrt(rms/SIZE) < 0.01) return -1; // 소리가 너무 작으면 무시
+
+            let r1=0, r2=SIZE-1, thres=0.2;
+            for (let i=0; i<SIZE/2; i++) if (Math.abs(buf[i]) < thres) { r1=i; break; }
+            for (let i=1; i<SIZE/2; i++) if (Math.abs(buf[SIZE-i]) < thres) { r2=SIZE-i; break; }
+            buf = buf.slice(r1,r2);
+            SIZE = buf.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i=0; i<SIZE; i++)
+                for (let j=0; j<SIZE-i; j++)
+                    c[i] = c[i] + buf[j]*buf[j+i];
+
+            let d=0; while (c[d]>c[d+1]) d++;
+            let maxval=-1, maxpos=-1;
+            for (let i=d; i<SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            return sampleRate/maxpos;
+        }
+    </script>
+</body>
+</html>
