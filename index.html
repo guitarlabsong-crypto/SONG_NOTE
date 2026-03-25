@@ -2,28 +2,123 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>AI 실시간 채보 시스템</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SymGuitarLab Real-time Transcriber</title>
     <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f4f4f4; }
-        #output { font-size: 2rem; color: #333; margin: 20px; font-weight: bold; }
-        #score { background: white; display: inline-block; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        button { padding: 10px 20px; font-size: 1.2rem; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #fdfdfd;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* 1. 필수 영문 워터마크 스타일 */
+        #watermark {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.2); /* 반투명 */
+            z-index: 1000;
+            pointer-events: none; /* 클릭 방지 */
+            letter-spacing: 1px;
+        }
+
+        header {
+            margin-top: 30px;
+            text-align: center;
+            z-index: 10;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            background: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: background 0.3s;
+        }
+        button:hover { background: #34495e; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+
+        #status {
+            margin-top: 10px;
+            font-size: 1rem;
+            color: #7f8c8d;
+            height: 1.2rem;
+        }
+
+        /* 2. 악보 컨테이너 (크게 설정) */
+        #score-container {
+            width: 95%; /* 화면 너비의 95% 사용 */
+            max-width: 1400px;
+            margin-top: 20px;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            /* 스크롤바 바깥으로 안나가게 */
+            overflow-x: hidden; 
+            overflow-y: auto;
+            flex-grow: 1; /* 남은 높이 차지 */
+            margin-bottom: 20px;
+        }
+
+        /* VexFlow SVG 스타일 */
+        #score-render-area svg {
+            width: 100%;
+            height: auto;
+        }
     </style>
 </head>
 <body>
 
-    <h1>실시간 기타/보컬 악보 변환기</h1>
-    <button onclick="startAudio()">마이크 시작</button>
-    <div id="output">준비됨</div>
-    <div id="score"></div>
+    <div id="watermark">SYMGuitarLab</div>
+
+    <header>
+        <h1>실시간 AI 채보 시스템</h1>
+        <button id="start-btn" onclick="startAudio()">마이크 입력 시작</button>
+        <div id="status">준비됨</div>
+    </header>
+
+    <div id="score-container">
+        <div id="score-render-area"></div>
+    </div>
 
     <script>
+        // --- 전역 변수 및 설정 ---
         let audioContext;
         let analyser;
         const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        
+        // 악보 렌더링 관련
+        const VF = Vex.Flow;
+        const renderArea = document.getElementById('score-render-area');
+        
+        // 인식된 음표를 저장할 배열
+        let recordedNotes = []; 
+        let isRecording = false;
+        let lastNoteName = "";
+        let noteHoldCounter = 0; // 같은 음이 지속되는지 확인
 
+        // 악보 크기 설정
+        const STAVE_WIDTH = 250; // 한 마디(또는 음표 그룹)의 너비
+        const MAX_WIDTH = 1200;  // 한 줄의 최대 너비
+        const STAVE_HEIGHT = 150; // 줄 간격
+
+        // --- 오디오 처리 로직 (Tuner 기반) ---
         function startAudio() {
+            if (isRecording) return;
+            
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioContext.createAnalyser();
             analyser.fftSize = 2048;
@@ -31,58 +126,146 @@
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                 const source = audioContext.createMediaStreamSource(stream);
                 source.connect(analyser);
-                drawScore("C/4"); // 초기 화면
+                isRecording = true;
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('start-btn').innerText = "녹음 중...";
+                document.getElementById('status').innerText = "소리를 내주세요...";
+                
+                // 초기 빈 악보 그리기
+                drawFullScore();
                 updatePitch();
+            }).catch(err => {
+                console.error("마이크 접근 실패:", err);
+                document.getElementById('status').innerText = "마이크 권한이 필요합니다.";
             });
         }
 
         function updatePitch() {
+            if (!isRecording) return;
+
             const buffer = new Float32Array(analyser.fftSize);
             analyser.getFloatTimeDomainData(buffer);
             
-            // 단순 피치 검출 알고리즘 (Autocorrelation)
+            // 피치 검출 (기초적인 Autocorrelation)
             const pitch = autoCorrelate(buffer, audioContext.sampleRate);
 
             if (pitch !== -1) {
                 const noteInfo = getNoteFromFreq(pitch);
-                document.getElementById('output').innerText = `인식된 음: ${noteInfo.name}${noteInfo.octave}`;
-                drawScore(`${noteInfo.name}/${noteInfo.octave}`);
+                const currentNote = `${noteInfo.name}/${noteInfo.octave}`;
+
+                // 단순화: 음이 바뀌거나, 같은 음이라도 일정 시간(frame) 지나면 새로운 음표로 인정
+                if (currentNote !== lastNoteName || noteHoldCounter > 20) {
+                    document.getElementById('status').innerText = `인식: ${currentNote}`;
+                    
+                    // 악보 배열에 추가
+                    recordedNotes.push({ key: currentNote, accidental: noteInfo.accidental });
+                    
+                    // 악보 다시 그리기 (자동 줄바꿈 포함)
+                    drawFullScore();
+                    
+                    lastNoteName = currentNote;
+                    noteHoldCounter = 0;
+                } else {
+                    noteHoldCounter++;
+                }
+            } else {
+                // 소리가 없을 때
+                noteHoldCounter = 0;
             }
+
             requestAnimationFrame(updatePitch);
         }
 
-        // 주파수를 음이름과 옥타브로 변환
-        function getNoteFromFreq(freq) {
-            const number = 12 * (Math.log2(freq / 440)) + 69;
-            const index = Math.round(number) % 12;
-            const octave = Math.floor(Math.round(number) / 12) - 1;
-            return { name: noteNames[index], octave: octave };
-        }
+        // --- VexFlow 악보 그리기 로직 (3번 핵심: 자동 줄바꿈) ---
+        function drawFullScore() {
+            // 1. 이전 렌더링 지우기
+            renderArea.innerHTML = "";
 
-        // VexFlow를 이용한 악보 그리기
-        function drawScore(noteKey) {
-            const div = document.getElementById("score");
-            div.innerHTML = ""; // 이전 악보 삭제
-            
-            const renderer = new Vex.Flow.Renderer(div, Vex.Flow.Renderer.Backends.SVG);
-            renderer.resize(200, 200);
-            const context = renderer.getContext();
-            const stave = new Vex.Flow.Stave(10, 40, 150);
-            stave.addClef("treble").setContext(context).draw();
-
-            // 샵(#) 처리 logic
-            const note = new Vex.Flow.StaveNote({ keys: [noteKey], duration: "q" });
-            if (noteKey.includes("#")) {
-                note.addModifier(new Vex.Flow.Accidental("#"));
+            if (recordedNotes.length === 0) {
+                // 빈 오선지 하나만 그리기
+                const renderer = new VF.Renderer(renderArea, VF.Renderer.Backends.SVG);
+                renderer.resize(MAX_WIDTH, STAVE_HEIGHT + 50);
+                const context = renderer.getContext();
+                const stave = new VF.Stave(10, 40, MAX_WIDTH - 20);
+                stave.addClef("treble").addTimeSignature("4/4").setContext(context).draw();
+                return;
             }
 
-            const voice = new Vex.Flow.Voice({ num_beats: 1, beat_value: 4 });
-            voice.addTickables([note]);
-            new Vex.Flow.Formatter().joinVoices([voice]).format([voice], 100);
-            voice.draw(context, stave);
+            // 2. 음표 객체 생성 및 샵(#) 처리
+            const vfNotes = recordedNotes.map(noteData => {
+                const note = new VF.StaveNote({ keys: [noteData.key], duration: "q" }); // 4분음표 고정
+                if (noteData.accidental) {
+                    note.addModifier(new VF.Accidental(noteData.accidental));
+                }
+                return note;
+            });
+
+            // 3. 줄바꿈 로직 계산
+            const notesPerStave = Math.floor(MAX_WIDTH / STAVE_WIDTH);
+            const totalStaves = Math.ceil(vfNotes.length / notesPerStave);
+            
+            // 전체 SVG 캔버스 크기 설정
+            const renderer = new VF.Renderer(renderArea, VF.Renderer.Backends.SVG);
+            const totalHeight = totalStaves * STAVE_HEIGHT + 50;
+            renderer.resize(MAX_WIDTH, totalHeight);
+            const context = renderer.getContext();
+
+            // 4. 각 줄(System)마다 음표를 나누어 그리기
+            for (let i = 0; i < totalStaves; i++) {
+                const startIdx = i * notesPerStave;
+                const endIdx = Math.min((i + 1) * notesPerStave, vfNotes.length);
+                const staveNotes = vfNotes.slice(startIdx, endIdx);
+
+                // 현재 줄의 오선지 생성
+                const x = 10;
+                const y = i * STAVE_HEIGHT + 40;
+                const width = MAX_WIDTH - 20;
+                const stave = new VF.Stave(x, y, width);
+
+                // 첫 번째 줄에만 높은음자리표와 박자기호 표시
+                if (i === 0) {
+                    stave.addClef("treble").addTimeSignature("4/4");
+                }
+
+                stave.setContext(context).draw();
+
+                // 음표가 있으면 그리기
+                if (staveNotes.length > 0) {
+                    // Voice 생성 (박자 맞추기)
+                    // 단순 구현을 위해 각 줄의 박자 수는 n분 음표 개수로 설정
+                    const voice = new VF.Voice({ num_beats: staveNotes.length, beat_value: 4 });
+                    voice.addTickables(staveNotes);
+
+                    // 포맷터로 음표 간격 자동 조절
+                    new VF.Formatter().joinVoices([voice]).format([voice], width - 50);
+                    
+                    voice.draw(context, stave);
+                }
+            }
+
+            // 자동 스크롤: 새 음표가 추가되면 맨 아래로
+            const container = document.getElementById('score-container');
+            container.scrollTop = container.scrollHeight;
         }
 
-        // 단순 자기상관 함수 (피치 검출용)
+        // --- 유틸리티 함수들 (Tuner 동일) ---
+
+        function getNoteFromFreq(freq) {
+            // A4 = 440Hz 기준 MIDI Note Number 계산
+            const number = 12 * (Math.log2(freq / 440)) + 69;
+            const roundedNumber = Math.round(number);
+            const index = roundedNumber % 12;
+            const octave = Math.floor(roundedNumber / 12) - 1;
+            
+            const name = noteNames[index];
+            return { 
+                name: name.replace('#', ''), // VexFlow Key용 (e.g., C)
+                octave: octave,
+                accidental: name.includes('#') ? '#' : null // 샵 유무
+            };
+        }
+
+        // 기초적인 피치 검출 알고리즘
         function autoCorrelate(buf, sampleRate) {
             let SIZE = buf.length;
             let rms = 0;
