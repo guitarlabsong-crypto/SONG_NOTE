@@ -3,22 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sing Song Write v12</title>
+    <title>Sing Song Write v13</title>
     <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
     <style>
-        :root { --navy: #000080; --red: #c0392b; --orange: #ff8c00; --lime: #32cd32; }
+        :root { --navy: #000080; --red: #c0392b; --orange: #ff8c00; --lime: #32cd32; --gray: #555; }
         body { font-family: sans-serif; margin: 0; background: #fff; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
         header { width: 100%; padding: 8px 0; border-bottom: 1px solid #eee; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
         .title-row { display: flex; align-items: center; gap: 10px; }
-        h1 { font-size: 1rem; margin: 0; color: var(--navy); letter-spacing: -0.5px; }
+        h1 { font-size: 1rem; margin: 0; color: var(--navy); }
         #status-display { font-weight: bold; color: var(--red); font-size: 0.85rem; min-width: 50px; text-align: center; }
-        .settings { font-size: 0.75rem; color: #888; margin-top: 2px; }
 
-        /* 2. 악보 크기 대폭 축소 및 4마디 최적화 */
         #score-wrapper { position: relative; flex: 1; width: 100%; background: white; overflow-y: auto; overflow-x: hidden; }
         
-        /* 1, 5. 플레이헤드 (LED 통합형) */
         #playhead { 
             position: absolute; width: 2px; height: 55px; background: #ccc; z-index: 50; display: none;
             box-shadow: 0 0 8px rgba(0,0,0,0.1);
@@ -26,18 +23,16 @@
         #playhead.first-beat { background: var(--orange) !important; box-shadow: 0 0 12px var(--orange); }
         #playhead.other-beat { background: var(--lime) !important; box-shadow: 0 0 12px var(--lime); }
 
-        /* 4, 5. 하단 버튼 디자인 수정 */
         .bottom-controls { 
             display: flex; gap: 6px; padding: 10px; background: #f8f9fa; 
             border-top: 1px solid #ddd; padding-bottom: calc(10px + env(safe-area-inset-bottom));
         }
-        .small-btn { flex: 1; padding: 12px 0; font-size: 0.8rem; font-weight: bold; border: none; border-radius: 6px; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; }
+        .small-btn { flex: 1; padding: 12px 0; font-size: 0.8rem; font-weight: bold; border: none; border-radius: 6px; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         #rec-btn { background: var(--navy); }
         #stop-btn { background: var(--red); display: none; }
         #play-btn { background: #27ae60; }
-        /* 4. 지우기 버튼 특화 */
-        #del-btn { background: #555; flex: 0 0 65px; }
-        .del-sub { font-size: 0.6rem; font-weight: normal; opacity: 0.8; }
+        #stop-play-btn { background: var(--gray); display: none; } /* 2. 재생 정지 버튼 */
+        #del-btn { background: var(--gray); flex: 0 0 65px; }
 
         footer { padding: 4px; text-align: center; font-size: 0.75rem; color: #ddd; font-weight: bold; }
     </style>
@@ -49,10 +44,7 @@
             <h1>SING SONG Write</h1>
             <div id="status-display">READY</div>
         </div>
-        <div class="settings">
-            BPM <input type="number" id="bpm-input" value="80" style="width:32px; border:none; border-bottom:1px solid #ccc; text-align:center;">
-            | 4 Measures
-        </div>
+        <div style="font-size:0.75rem; color:#888;">BPM <input type="number" id="bpm-input" value="80" style="width:32px; border:none; border-bottom:1px solid #ccc; text-align:center;"></div>
     </header>
 
     <div id="score-wrapper">
@@ -61,12 +53,11 @@
     </div>
 
     <div class="bottom-controls">
-        <button id="del-btn" class="small-btn" onclick="deleteLast()">
-            <span>←</span><span class="del-sub">Del. 지우기</span>
-        </button>
+        <button id="del-btn" class="small-btn" onclick="deleteLast()"><span>←</span><span style="font-size:0.6rem;">Del. 지우기</span></button>
         <button id="rec-btn" class="small-btn" onclick="startRecording()">RECORD</button>
         <button id="stop-btn" class="small-btn" onclick="stopRecording()">STOP</button>
         <button id="play-btn" class="small-btn" onclick="playbackMelody()">PLAY</button>
+        <button id="stop-play-btn" class="small-btn" onclick="stopPlayback()">STOP PLAY</button>
     </div>
 
     <footer>SONG, YOUNG-MIN Guitar Lab</footer>
@@ -75,60 +66,46 @@
         let audioCtx, analyser, isRecording = false, isPlaying = false;
         let bpm, beatSec, timeSig = 4;
         let recordedNotes = [];
-        let startTime, recognition;
+        let startTime, recognition, playOscillators = [];
         const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
         let lastTranscript = "";
 
-        // 메트로놈 클릭 사운드 함수
         function playClick(isFirstBeat) {
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.frequency.value = isFirstBeat ? 1000 : 800;
-            osc.type = 'sine';
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
             osc.connect(gain).connect(audioCtx.destination);
             osc.start(); osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        // 음성 인식 설정
-        function setupSpeech() {
+        async function startRecording() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                audioCtx.createMediaStreamSource(stream).connect(analyser);
+            }
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRec) {
                 recognition = new SpeechRec();
                 recognition.continuous = true;
                 recognition.interimResults = true;
                 recognition.lang = 'ko-KR';
-                recognition.onresult = (e) => {
-                    for (let i = e.resultIndex; i < e.results.length; i++) {
-                        lastTranscript = e.results[i][0].transcript.trim().split(' ').pop();
-                    }
-                };
+                recognition.onresult = (e) => { lastTranscript = e.results[e.results.length-1][0].transcript.trim().split(' ').pop(); };
             }
-        }
-
-        // 1. 예비박자 4번 후 녹음 시작
-        async function startRecording() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 1024;
-                audioCtx.createMediaStreamSource(stream).connect(analyser);
-            }
-            setupSpeech();
             bpm = document.getElementById('bpm-input').value;
             beatSec = 60 / bpm;
             
             document.getElementById('rec-btn').style.display = 'none';
             document.getElementById('stop-btn').style.display = 'inline-block';
-            document.getElementById('playhead').style.display = 'block';
             
             let count = 0;
             const preInterval = setInterval(() => {
                 playClick(count === 0);
                 document.getElementById('status-display').innerText = `READY ${count + 1}`;
-                updatePlayheadUI(0, count); // 예비박자 시 0번 위치에서 LED만 깜빡
                 count++;
                 if (count >= 4) {
                     clearInterval(preInterval);
@@ -136,13 +113,13 @@
                     if(recognition) recognition.start();
                     startTime = audioCtx.currentTime;
                     document.getElementById('status-display').innerText = "REC";
+                    document.getElementById('playhead').style.display = 'block';
                     updateLoop();
                 }
             }, beatSec * 1000);
         }
 
         function stopRecording() {
-            isRecording = true; isPlaying = false; // 루프 중단용
             isRecording = false;
             if(recognition) recognition.stop();
             document.getElementById('rec-btn').style.display = 'inline-block';
@@ -154,124 +131,86 @@
         function updateLoop() {
             if (!isRecording) return;
             const totalBeats = (audioCtx.currentTime - startTime) / beatSec;
-            updatePlayheadUI(totalBeats, totalBeats);
+            updatePlayheadUI(totalBeats);
             detectPitch(totalBeats);
             requestAnimationFrame(updateLoop);
         }
 
-        // 플레이헤드 위치 및 LED (박자 동기화)
-        function updatePlayheadUI(beat, actualBeat) {
+        function updatePlayheadUI(beat) {
             const head = document.getElementById('playhead');
             const mIdx = Math.floor(beat / timeSig);
             const line = Math.floor(mIdx / 4);
             const col = mIdx % 4;
             const step = window.innerWidth / 4;
-            
             head.style.left = `${(col * step) + ((beat % timeSig) / timeSig * step)}px`;
-            head.style.top = `${15 + (line * 75)}px`; // 2. 행간 더 줄임
-
-            const bDec = actualBeat % 1;
-            if (bDec < 0.2) {
-                head.className = (Math.floor(actualBeat % timeSig) === 0) ? 'first-beat' : 'other-beat';
-            } else { head.className = ''; }
+            head.style.top = `${15 + (line * 75)}px`;
+            const bDec = beat % 1;
+            if (bDec < 0.2) head.className = (Math.floor(beat % timeSig) === 0) ? 'first-beat' : 'other-beat';
+            else head.className = '';
         }
 
         let lastNoteName = "", noteStart = 0;
         function detectPitch(currentBeat) {
             const buffer = new Float32Array(analyser.fftSize);
             analyser.getFloatTimeDomainData(buffer);
-            const freq = getPitch(buffer, audioCtx.sampleRate);
+            let freq = getPitch(buffer, audioCtx.sampleRate);
 
             if (freq !== -1) {
-                const info = getNoteInfo(freq);
-                const name = info.key + info.octave;
+                // 1. 목소리 음높이 보정 (한 옥타브 위로 시프트하여 높은음자리표 안착)
+                freq = freq * 2; 
+                const num = 12 * (Math.log2(freq / 440)) + 69;
+                const rnd = Math.round(num);
+                let oct = Math.floor(rnd / 12) - 1;
+                const name = noteNames[rnd % 12].replace('#','') + oct;
+                
                 if (lastNoteName === "") {
                     noteStart = Math.round(currentBeat * 4) / 4;
                     lastNoteName = name;
                 }
             } else if (lastNoteName !== "") {
                 const duration = Math.round(currentBeat * 4) / 4 - noteStart;
+                // 3. 플레이헤드가 지나간 후에만 그리도록 duration 보장
                 if (duration >= 0.25) {
-                    const info = getNoteInfoFromID(lastNoteName);
-                    // 3. 알파벳(Key) 제거, 가사(Lyric)만 유지
-                    recordedNotes.push({ ...info, startBeat: noteStart, type: duration >= 0.7 ? "q" : "8", lyric: lastTranscript });
-                    drawScore();
+                    const key = lastNoteName.slice(0, -1);
+                    const oct = parseInt(lastNoteName.slice(-1));
+                    recordedNotes.push({ key, octave: oct, accidental: key.includes('#') ? '#' : null, startBeat: noteStart, type: duration >= 0.7 ? "q" : "8", lyric: lastTranscript });
+                    drawScore(currentBeat); // 현재 박자 전달
                     lastTranscript = "";
                 }
                 lastNoteName = "";
             }
         }
 
-        // 5. 재생 시 플레이헤드 동기화
-        function playbackMelody() {
-            if (recordedNotes.length === 0 || isPlaying) return;
-            isPlaying = true;
-            const playStartTime = audioCtx.currentTime;
-            document.getElementById('playhead').style.display = 'block';
-
-            recordedNotes.forEach(n => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                const freq = 440 * Math.pow(2, (getMidiNum(n) - 69) / 12);
-                osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0.2, playStartTime + n.startBeat * beatSec);
-                gain.gain.exponentialRampToValueAtTime(0.001, playStartTime + (n.startBeat + 0.4) * beatSec);
-                osc.connect(gain).connect(audioCtx.destination);
-                osc.start(playStartTime + n.startBeat * beatSec);
-                osc.stop(playStartTime + (n.startBeat + 0.4) * beatSec);
-            });
-
-            function animPlay() {
-                if (!isPlaying) return;
-                const elapsedBeats = (audioCtx.currentTime - playStartTime) / beatSec;
-                updatePlayheadUI(elapsedBeats, elapsedBeats);
-                if (elapsedBeats > recordedNotes[recordedNotes.length-1].startBeat + 2) {
-                    isPlaying = false;
-                    document.getElementById('playhead').style.display = 'none';
-                } else {
-                    requestAnimationFrame(animPlay);
-                }
-            }
-            animPlay();
-        }
-
-        function getMidiNum(n) {
-            const idx = noteNames.indexOf(n.key + (n.accidental || ""));
-            return (n.octave + 1) * 12 + idx;
-        }
-
-        function drawScore() {
+        // 3. 렌더링 가드: 현재 플레이헤드(currentBeat)보다 앞선 음표는 그리지 않음
+        function drawScore(currentBeat = 999) {
             const area = document.getElementById('score-render-area');
             area.innerHTML = "";
             const VF = Vex.Flow;
             const renderer = new VF.Renderer(area, VF.Renderer.Backends.SVG);
             let measures = [];
             recordedNotes.forEach(n => {
-                const mIdx = Math.floor(n.startBeat / timeSig);
-                if(!measures[mIdx]) measures[mIdx] = [];
-                measures[mIdx].push(n);
+                if (n.startBeat <= currentBeat) { // 플레이헤드가 지난 음표만 허용
+                    const mIdx = Math.floor(n.startBeat / timeSig);
+                    if(!measures[mIdx]) measures[mIdx] = [];
+                    measures[mIdx].push(n);
+                }
             });
             const totalM = Math.max(measures.length, 4);
             const rows = Math.ceil(totalM / 4);
-            const areaWidth = window.innerWidth;
-            const step = areaWidth / 4;
-
-            renderer.resize(areaWidth, rows * 75 + 30);
+            renderer.resize(window.innerWidth, rows * 75 + 30);
             const ctx = renderer.getContext();
-            ctx.scale(0.55, 0.55); // 2. 악보 크기 추가 축소
+            ctx.scale(0.55, 0.55);
 
             for (let i = 0; i < totalM; i++) {
                 const r = Math.floor(i / 4), c = i % 4;
-                const sW = step / 0.55;
+                const sW = (window.innerWidth / 4) / 0.55;
                 const stave = new VF.Stave(c * sW, r * (75/0.55), sW);
                 if (c === 0) stave.addClef("treble");
                 stave.setContext(ctx).draw();
-
                 if (measures[i]) {
                     const notes = measures[i].map(d => {
                         const sn = new VF.StaveNote({ keys: [`${d.key}/${d.octave}`], duration: d.type });
                         if (d.accidental) sn.addModifier(new VF.Accidental(d.accidental));
-                        // 3. 알파벳 제거, 가사만 표시
                         if (d.lyric) sn.addModifier(new VF.Annotation(d.lyric).setVerticalJustification(VF.Annotation.VerticalJustify.BOTTOM));
                         return sn;
                     });
@@ -283,7 +222,47 @@
             }
         }
 
-        // --- 초기 버전 기반 피치 검출 로직 ---
+        // 2. 재생 및 재생 정지 로직
+        function playbackMelody() {
+            if (recordedNotes.length === 0 || isPlaying) return;
+            isPlaying = true;
+            document.getElementById('play-btn').style.display = 'none';
+            document.getElementById('stop-play-btn').style.display = 'inline-block';
+            document.getElementById('playhead').style.display = 'block';
+            const playStartTime = audioCtx.currentTime;
+            
+            recordedNotes.forEach(n => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                const freq = 440 * Math.pow(2, (( (n.octave + 1) * 12 + noteNames.indexOf(n.key + (n.accidental || "")) ) - 69) / 12);
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.2, playStartTime + n.startBeat * beatSec);
+                gain.gain.exponentialRampToValueAtTime(0.001, playStartTime + (n.startBeat + 0.4) * beatSec);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(playStartTime + n.startBeat * beatSec);
+                osc.stop(playStartTime + (n.startBeat + 0.4) * beatSec);
+                playOscillators.push(osc);
+            });
+
+            function anim() {
+                if (!isPlaying) return;
+                const elapsed = (audioCtx.currentTime - playStartTime) / beatSec;
+                updatePlayheadUI(elapsed);
+                if (elapsed > recordedNotes[recordedNotes.length-1].startBeat + 2) stopPlayback();
+                else requestAnimationFrame(anim);
+            }
+            anim();
+        }
+
+        function stopPlayback() {
+            isPlaying = false;
+            playOscillators.forEach(o => { try { o.stop(); } catch(e){} });
+            playOscillators = [];
+            document.getElementById('play-btn').style.display = 'inline-block';
+            document.getElementById('stop-play-btn').style.display = 'none';
+            document.getElementById('playhead').style.display = 'none';
+        }
+
         function getPitch(buf, sampleRate) {
             let sum = 0; for (let i=0; i<buf.length; i++) sum += buf[i]*buf[i];
             if (Math.sqrt(sum/buf.length) < 0.02) return -1;
@@ -295,20 +274,6 @@
                 if (corr > bestCorrelation) { bestCorrelation = corr; bestOffset = offset; }
             }
             return (bestCorrelation > 0.85) ? sampleRate/bestOffset : -1;
-        }
-
-        function getNoteInfo(freq) {
-            const num = 12 * (Math.log2(freq / 440)) + 69;
-            const rnd = Math.round(num);
-            let oct = Math.floor(rnd / 12) - 1;
-            if (oct < 4) oct += 1;
-            return { key: noteNames[rnd % 12].replace('#',''), octave: oct, accidental: noteNames[rnd % 12].includes('#') ? '#' : null };
-        }
-
-        function getNoteInfoFromID(id) {
-            const key = id.slice(0, -1);
-            const oct = parseInt(id.slice(-1));
-            return { key, octave: oct, accidental: key.includes('#') ? '#' : null };
         }
 
         function deleteLast() { recordedNotes.pop(); drawScore(); }
