@@ -3,217 +3,246 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aleatoric Universe - SONG, YOUNG-MIN</title>
+    <title>Sing Song Write v15</title>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; touch-action: none; }
-        #header {
-            position: absolute; top: 0; width: 100%; height: 70px;
-            background: rgba(0, 0, 0, 0.8); color: #0ff; display: flex;
-            flex-direction: column; align-items: center; justify-content: center; z-index: 100;
-            border-bottom: 1px solid #333;
-        }
-        #watermark { font-size: 10px; opacity: 0.7; margin-bottom: 8px; }
-        .controls { display: flex; gap: 15px; }
-        button {
-            padding: 6px 12px; background: transparent; border: 1px solid #0ff;
-            color: #0ff; border-radius: 4px; font-size: 11px; cursor: pointer;
-            text-transform: uppercase;
-        }
-        button:active { background: #0ff; color: #000; }
-        canvas { display: block; }
+        :root { --navy: #000080; --red: #c0392b; --orange: #ff8c00; --lime: #32cd32; }
+        body { font-family: sans-serif; margin: 0; background: #fff; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { width: 100%; padding: 10px 0; border-bottom: 1px solid #eee; flex-shrink: 0; text-align: center; }
+        h1 { font-size: 1.1rem; margin: 0; color: var(--navy); }
+        #status-display { font-weight: bold; color: var(--red); font-size: 0.9rem; margin-top: 4px; }
+        
+        #score-wrapper { position: relative; flex: 1; width: 100%; background: white; overflow-y: auto; overflow-x: hidden; }
+        #playhead { position: absolute; width: 3px; height: 60px; background: #ddd; z-index: 50; display: none; }
+        #playhead.first-beat { background: var(--orange); box-shadow: 0 0 10px var(--orange); }
+        #playhead.other-beat { background: var(--lime); box-shadow: 0 0 10px var(--lime); }
+
+        .bottom-controls { display: flex; gap: 8px; padding: 12px; background: #f8f9fa; border-top: 1px solid #ddd; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+        .small-btn { flex: 1; padding: 14px 0; font-size: 0.9rem; font-weight: bold; border: none; border-radius: 8px; color: white; cursor: pointer; }
+        #rec-btn { background: var(--navy); }
+        #stop-btn { background: var(--red); display: none; }
+        #play-btn { background: #27ae60; }
+        
+        footer { padding: 5px; text-align: center; font-size: 0.7rem; color: #bbb; }
     </style>
 </head>
 <body>
 
-<div id="header">
-    <div id="watermark">SONG, YOUNG-MIN Guitar Lab | ALEATORIC SPACE</div>
-    <div class="controls">
-        <button onclick="spawnMeteor()">☄️ SPAWN METEOR</button>
-        <button onclick="togglePause()">⏸ PAUSE</button>
+    <header>
+        <h1>SING SONG Write</h1>
+        <div id="status-display">READY</div>
+        <div style="font-size:0.75rem; color:#888; margin-top:5px;">BPM <input type="number" id="bpm-input" value="80" style="width:35px; text-align:center; border:none; border-bottom:1px solid #ccc;"></div>
+    </header>
+
+    <div id="score-wrapper">
+        <div id="playhead"></div>
+        <div id="score-render-area"></div>
     </div>
-</div>
 
-<canvas id="space"></canvas>
+    <div class="bottom-controls">
+        <button id="rec-btn" class="small-btn" onclick="startRecording()">RECORD (녹음)</button>
+        <button id="stop-btn" class="small-btn" onclick="stopRecording()">STOP & ANALYZE (분석)</button>
+        <button id="play-btn" class="small-btn" onclick="playVoice()">VOICE PLAY (재생)</button>
+    </div>
 
-<script>
-    const canvas = document.getElementById('space');
-    const ctx = canvas.getContext('2d');
-    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    const freqs = [261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00, 415.30, 440.00, 466.16, 493.88];
-    
-    let meteors = [];
-    let isPaused = false;
-    let width, height;
+    <footer>SONG, YOUNG-MIN Guitar Lab</footer>
 
-    // --- Audio Setup (Reverb) ---
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const mainGain = audioCtx.createGain();
-    const reverbNode = audioCtx.createConvolver();
-    const delay = audioCtx.createDelay(0.5);
-    const feedback = audioCtx.createGain();
+    <script>
+        let audioCtx, mediaRecorder, chunks = [], audioURL, audioPlayer;
+        let isRecording = false, isPlaying = false;
+        let bpm, beatSec, startTime, recognition;
+        let recordedNotes = [], rawPitchData = [];
+        const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let fullTranscript = [];
 
-    delay.delayTime.value = 0.3;
-    feedback.gain.value = 0.4;
-    delay.connect(feedback);
-    feedback.connect(delay); // Echo loop
+        async function startRecording() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // 1. 실제 오디오 녹음 설정
+            mediaRecorder = new MediaRecorder(stream);
+            chunks = [];
+            mediaRecorder.ondataavailable = e => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'audio/ogg; codecs=opus' });
+                audioURL = window.URL.createObjectURL(blob);
+                audioPlayer = new Audio(audioURL);
+            };
 
-    mainGain.connect(delay);
-    delay.connect(audioCtx.destination);
-    mainGain.connect(audioCtx.destination);
-
-    function playNote(index) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.type = 'triangle'; 
-        osc.frequency.setValueAtTime(freqs[index], audioCtx.currentTime);
-        g.gain.setValueAtTime(0.3, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 2);
-        osc.connect(g);
-        g.connect(mainGain);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 2);
-    }
-
-    // --- Physics: Triple Pendulum Meteor ---
-    class TriplePendulumMeteor {
-        constructor(x, y) {
-            this.x = x; this.y = y;
-            // 3개 마디의 각도와 각속도 (Chaos 파라미터)
-            this.angles = [Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI];
-            this.vAngles = [0, 0, 0];
-            this.lengths = [20, 20, 20]; // 진자 마디 길이
-            this.baseVel = { x: 0, y: 0 }; // 전체 이동 속도
-            this.isDragging = false;
-            this.history = [];
-            this.hue = Math.random() * 360;
-        }
-
-        update() {
-            if (isPaused || this.isDragging) return;
-
-            // 3중 진자 알고리즘을 단순화한 카오스 운동 부여
-            for(let i=0; i<3; i++) {
-                this.vAngles[i] += (Math.random() - 0.5) * 0.02; // 무중력 속 미세 섭동
-                this.angles[i] += this.vAngles[i];
+            // 2. 가사 인식 설정
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRec) {
+                recognition = new SpeechRec();
+                recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'ko-KR';
+                recognition.onresult = (e) => {
+                    let result = e.results[e.results.length-1];
+                    if(result.isFinal) {
+                        fullTranscript.push({ text: result[0].transcript.trim(), time: (audioCtx.currentTime - startTime) / beatSec });
+                    }
+                };
             }
 
-            this.x += this.baseVel.x;
-            this.y += this.baseVel.y;
+            // 3. 음정 데이터 수집 엔진 (분석용)
+            const analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            
+            bpm = document.getElementById('bpm-input').value;
+            beatSec = 60 / bpm;
+            recordedNotes = []; rawPitchData = []; fullTranscript = [];
 
-            // 벽 충돌 및 사운드 트리거
-            if (this.x < 0 || this.x > width) {
-                this.baseVel.x *= -1;
-                playNote(Math.floor((this.y / height) * 12) % 12);
+            // 카운트다운 후 시작
+            let count = 0;
+            const timer = setInterval(() => {
+                document.getElementById('status-display').innerText = `READY ${4 - count}`;
+                count++;
+                if (count > 4) {
+                    clearInterval(timer);
+                    mediaRecorder.start();
+                    if(recognition) recognition.start();
+                    startTime = audioCtx.currentTime;
+                    isRecording = true;
+                    document.getElementById('status-display').innerText = "RECORDING...";
+                    document.getElementById('rec-btn').style.display = 'none';
+                    document.getElementById('stop-btn').style.display = 'inline-block';
+                    document.getElementById('playhead').style.display = 'block';
+                    
+                    recordLoop(analyser);
+                }
+            }, beatSec * 1000);
+        }
+
+        function recordLoop(analyser) {
+            if (!isRecording) return;
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            const freq = getPitch(buffer, audioCtx.sampleRate);
+            const nowBeat = (audioCtx.currentTime - startTime) / beatSec;
+            
+            if (freq !== -1) rawPitchData.push({ beat: nowBeat, freq: freq * 2 }); // 목소리 보정 포함
+            updatePlayheadUI(nowBeat);
+            requestAnimationFrame(() => recordLoop(analyser));
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            mediaRecorder.stop();
+            if(recognition) recognition.stop();
+            document.getElementById('status-display').innerText = "ANALYZING...";
+            
+            setTimeout(() => {
+                analyzeData(); // 후처리 분석 시작
+                drawScore();
+                document.getElementById('status-display').innerText = "DONE!";
+                document.getElementById('rec-btn').style.display = 'inline-block';
+                document.getElementById('stop-btn').style.display = 'none';
+                document.getElementById('playhead').style.display = 'none';
+            }, 1000);
+        }
+
+        // 4. 후처리 분석 로직 (데이터 정제)
+        function analyzeData() {
+            if (rawPitchData.length < 5) return;
+            
+            let tempNote = null;
+            for (let i = 0; i < rawPitchData.length; i++) {
+                const d = rawPitchData[i];
+                const num = 12 * (Math.log2(d.freq / 440)) + 69;
+                const rnd = Math.round(num);
+                const name = noteNames[rnd % 12].replace('#','') + (Math.floor(rnd / 12) - 1);
+
+                if (!tempNote) {
+                    tempNote = { key: name.slice(0,-1), octave: parseInt(name.slice(-1)), startBeat: d.beat, endBeat: d.beat };
+                } else if (name.slice(0,-1) === tempNote.key) {
+                    tempNote.endBeat = d.beat;
+                } else {
+                    const dur = tempNote.endBeat - tempNote.startBeat;
+                    if (dur > 0.2) {
+                        // 가장 가까운 가사 매칭
+                        const lyricObj = fullTranscript.find(l => Math.abs(l.time - tempNote.startBeat) < 1.0);
+                        recordedNotes.push({ ...tempNote, duration: dur, type: dur > 0.6 ? "q" : "8", lyric: lyricObj ? lyricObj.text : "" });
+                    }
+                    tempNote = null;
+                }
             }
-            if (this.y < 70 || this.y > height) {
-                this.baseVel.y *= -1;
-                playNote(Math.floor((this.x / width) * 12) % 12);
+        }
+
+        // 5. 실제 목소리 재생 및 플레이헤드 동기화
+        function playVoice() {
+            if (!audioPlayer || isPlaying) return;
+            isPlaying = true;
+            audioPlayer.play();
+            document.getElementById('playhead').style.display = 'block';
+            const playStart = performance.now();
+
+            function anim() {
+                if (!isPlaying) return;
+                const elapsed = (performance.now() - playStart) / 1000 / beatSec;
+                updatePlayheadUI(elapsed);
+                if (audioPlayer.ended) {
+                    isPlaying = false;
+                    document.getElementById('playhead').style.display = 'none';
+                } else requestAnimationFrame(anim);
             }
-
-            this.history.push({x: this.x, y: this.y});
-            if (this.history.length > 30) this.history.shift();
+            anim();
         }
 
-        draw() {
-            ctx.beginPath();
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = `hsla(${this.hue}, 100%, 50%, 0.8)`;
-            ctx.strokeStyle = `hsla(${this.hue}, 100%, 70%, 0.5)`;
-            this.history.forEach((pos, i) => ctx.lineTo(pos.x, pos.y));
-            ctx.stroke();
+        function updatePlayheadUI(beat) {
+            const head = document.getElementById('playhead');
+            const mIdx = Math.floor(beat / 4);
+            const line = Math.floor(mIdx / 4);
+            const col = mIdx % 4;
+            const step = window.innerWidth / 4;
+            head.style.left = `${(col * step) + ((beat % 4) / 4 * step)}px`;
+            head.style.top = `${15 + (line * 80)}px`;
+            head.className = (beat % 1 < 0.2) ? (Math.floor(beat % 4) === 0 ? 'first-beat' : 'other-beat') : '';
+        }
 
-            // 3중 진자 시각화
-            let curX = this.x, curY = this.y;
-            ctx.strokeStyle = '#fff';
-            ctx.beginPath();
-            ctx.moveTo(curX, curY);
-            for(let i=0; i<3; i++) {
-                curX += Math.sin(this.angles[i]) * this.lengths[i];
-                curY += Math.cos(this.angles[i]) * this.lengths[i];
-                ctx.lineTo(curX, curY);
+        function drawScore() {
+            const area = document.getElementById('score-render-area');
+            area.innerHTML = "";
+            const VF = Vex.Flow;
+            const renderer = new VF.Renderer(area, VF.Renderer.Backends.SVG);
+            let measures = [];
+            recordedNotes.forEach(n => {
+                const mIdx = Math.floor(n.startBeat / 4);
+                if(!measures[mIdx]) measures[mIdx] = [];
+                measures[mIdx].push(n);
+            });
+            const totalM = Math.max(measures.length, 4);
+            renderer.resize(window.innerWidth, Math.ceil(totalM/4) * 80 + 40);
+            const ctx = renderer.getContext(); ctx.scale(0.5, 0.5);
+
+            for (let i = 0; i < totalM; i++) {
+                const stave = new VF.Stave((i%4)*(window.innerWidth/4/0.5), Math.floor(i/4)*(80/0.5), window.innerWidth/4/0.5);
+                if(i%4===0) stave.addClef("treble");
+                stave.setContext(ctx).draw();
+                if (measures[i]) {
+                    const notes = measures[i].map(d => {
+                        const sn = new VF.StaveNote({ keys: [`${d.key}/${d.octave}`], duration: d.type });
+                        if (d.lyric) sn.addModifier(new VF.Annotation(d.lyric).setVerticalJustification(VF.Annotation.VerticalJustify.BOTTOM));
+                        return sn;
+                    });
+                    const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setStrict(false);
+                    voice.addTickables(notes);
+                    new VF.Formatter().joinVoices([voice]).format([voice], (window.innerWidth/4/0.5) - 20);
+                    voice.draw(ctx, stave);
+                }
             }
-            ctx.stroke();
-            ctx.fillStyle = '#fff';
-            ctx.arc(curX, curY, 4, 0, Math.PI*2);
-            ctx.fill();
-            ctx.shadowBlur = 0;
         }
-    }
 
-    function resize() {
-        width = window.innerWidth;
-        height = window.innerHeight;
-        canvas.width = width;
-        canvas.height = height;
-    }
-
-    function drawGrid() {
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = '10px Courier New';
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
-
-        // 가로 벽 음계 표시 (상/하)
-        for(let i=0; i<12; i++) {
-            let x = (width / 12) * i + (width / 24);
-            ctx.fillText(notes[i], x, 85);
-            ctx.fillText(notes[i], x, height - 20);
-        }
-        // 세로 벽 음계 표시 (좌/우)
-        for(let i=0; i<12; i++) {
-            let y = ((height-70) / 12) * i + 70 + ((height-70) / 24);
-            ctx.fillText(notes[i], 20, y);
-            ctx.fillText(notes[i], width - 20, y);
-        }
-    }
-
-    let currentMeteor = null;
-    let touchStart = {x:0, y:0};
-
-    canvas.addEventListener('touchstart', e => {
-        const tx = e.touches[0].clientX;
-        const ty = e.touches[0].clientY;
-        // 클릭한 위치 근처의 유성 선택 혹은 생성 로직
-        meteors.forEach(m => {
-            if(Math.hypot(m.x - tx, m.y - ty) < 50) {
-                currentMeteor = m;
-                m.isDragging = true;
+        function getPitch(buf, sampleRate) {
+            let sum = 0; for (let i=0; i<buf.length; i++) sum += buf[i]*buf[i];
+            if (Math.sqrt(sum/buf.length) < 0.02) return -1;
+            let bestOffset = -1, bestCorrelation = 0;
+            for (let offset = 20; offset < 500; offset++) {
+                let corr = 0;
+                for (let i=0; i<buf.length-offset; i++) corr += Math.abs(buf[i]-buf[i+offset]);
+                corr = 1 - (corr/buf.length);
+                if (corr > bestCorrelation) { bestCorrelation = corr; bestOffset = offset; }
             }
-        });
-        touchStart = {x: tx, y: ty};
-    });
-
-    canvas.addEventListener('touchend', e => {
-        if(currentMeteor) {
-            const dx = e.changedTouches[0].clientX - touchStart.x;
-            const dy = e.changedTouches[0].clientY - touchStart.y;
-            currentMeteor.baseVel = { x: dx * 0.1, y: dy * 0.1 };
-            currentMeteor.isDragging = false;
-            currentMeteor = null;
+            return (bestCorrelation > 0.8) ? sampleRate/bestOffset : -1;
         }
-    });
-
-    function spawnMeteor() {
-        meteors.push(new TriplePendulumMeteor(width/2, height/2));
-    }
-
-    function togglePause() { isPaused = !isPaused; }
-
-    function render() {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-        ctx.fillRect(0, 0, width, height);
-        drawGrid();
-        meteors.forEach(m => {
-            m.update();
-            m.draw();
-        });
-        requestAnimationFrame(render);
-    }
-
-    window.addEventListener('resize', resize);
-    resize();
-    render();
-</script>
+    </script>
 </body>
 </html>
