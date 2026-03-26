@@ -3,48 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sing Song Write v13</title>
+    <title>Sing Song Write v14</title>
     <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
     <style>
-        :root { --navy: #000080; --red: #c0392b; --orange: #ff8c00; --lime: #32cd32; --gray: #555; }
+        :root { --navy: #000080; --red: #c0392b; --orange: #ff8c00; --lime: #32cd32; }
         body { font-family: sans-serif; margin: 0; background: #fff; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        
-        header { width: 100%; padding: 8px 0; border-bottom: 1px solid #eee; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
-        .title-row { display: flex; align-items: center; gap: 10px; }
+        header { width: 100%; padding: 8px 0; border-bottom: 1px solid #eee; flex-shrink: 0; text-align: center; }
         h1 { font-size: 1rem; margin: 0; color: var(--navy); }
-        #status-display { font-weight: bold; color: var(--red); font-size: 0.85rem; min-width: 50px; text-align: center; }
-
+        #status-display { font-weight: bold; color: var(--red); font-size: 0.8rem; }
         #score-wrapper { position: relative; flex: 1; width: 100%; background: white; overflow-y: auto; overflow-x: hidden; }
-        
-        #playhead { 
-            position: absolute; width: 2px; height: 55px; background: #ccc; z-index: 50; display: none;
-            box-shadow: 0 0 8px rgba(0,0,0,0.1);
-        }
-        #playhead.first-beat { background: var(--orange) !important; box-shadow: 0 0 12px var(--orange); }
-        #playhead.other-beat { background: var(--lime) !important; box-shadow: 0 0 12px var(--lime); }
-
-        .bottom-controls { 
-            display: flex; gap: 6px; padding: 10px; background: #f8f9fa; 
-            border-top: 1px solid #ddd; padding-bottom: calc(10px + env(safe-area-inset-bottom));
-        }
-        .small-btn { flex: 1; padding: 12px 0; font-size: 0.8rem; font-weight: bold; border: none; border-radius: 6px; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #playhead { position: absolute; width: 2.5px; height: 55px; background: #ccc; z-index: 50; display: none; }
+        #playhead.first-beat { background: var(--orange) !important; box-shadow: 0 0 10px var(--orange); }
+        #playhead.other-beat { background: var(--lime) !important; box-shadow: 0 0 10px var(--lime); }
+        .bottom-controls { display: flex; gap: 5px; padding: 10px; background: #f8f9fa; border-top: 1px solid #ddd; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+        .small-btn { flex: 1; padding: 12px 0; font-size: 0.8rem; font-weight: bold; border: none; border-radius: 6px; color: white; cursor: pointer; }
         #rec-btn { background: var(--navy); }
         #stop-btn { background: var(--red); display: none; }
         #play-btn { background: #27ae60; }
-        #stop-play-btn { background: var(--gray); display: none; } /* 2. 재생 정지 버튼 */
-        #del-btn { background: var(--gray); flex: 0 0 65px; }
-
+        #stop-play-btn { background: #555; display: none; }
         footer { padding: 4px; text-align: center; font-size: 0.75rem; color: #ddd; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <header>
-        <div class="title-row">
-            <h1>SING SONG Write</h1>
-            <div id="status-display">READY</div>
-        </div>
-        <div style="font-size:0.75rem; color:#888;">BPM <input type="number" id="bpm-input" value="80" style="width:32px; border:none; border-bottom:1px solid #ccc; text-align:center;"></div>
+        <h1>SING SONG Write</h1>
+        <div id="status-display">READY</div>
+        <div style="font-size:0.7rem; color:#888;">BPM <input type="number" id="bpm-input" value="80" style="width:30px; border:none; border-bottom:1px solid #ccc; text-align:center;"></div>
     </header>
 
     <div id="score-wrapper">
@@ -53,11 +38,11 @@
     </div>
 
     <div class="bottom-controls">
-        <button id="del-btn" class="small-btn" onclick="deleteLast()"><span>←</span><span style="font-size:0.6rem;">Del. 지우기</span></button>
+        <button id="del-btn" class="small-btn" onclick="deleteLast()" style="background:#555; flex:0 0 55px;">←</button>
         <button id="rec-btn" class="small-btn" onclick="startRecording()">RECORD</button>
         <button id="stop-btn" class="small-btn" onclick="stopRecording()">STOP</button>
         <button id="play-btn" class="small-btn" onclick="playbackMelody()">PLAY</button>
-        <button id="stop-play-btn" class="small-btn" onclick="stopPlayback()">STOP PLAY</button>
+        <button id="stop-play-btn" class="small-btn" onclick="stopPlayback()">STOP</button>
     </div>
 
     <footer>SONG, YOUNG-MIN Guitar Lab</footer>
@@ -66,14 +51,15 @@
         let audioCtx, analyser, isRecording = false, isPlaying = false;
         let bpm, beatSec, timeSig = 4;
         let recordedNotes = [];
-        let startTime, recognition, playOscillators = [];
+        let startTime, recognition, activeOscs = [];
         const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
         let lastTranscript = "";
 
-        function playClick(isFirstBeat) {
+        // 메트로놈 & 음성 인식 설정
+        function playClick(isFirst) {
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.frequency.value = isFirstBeat ? 1000 : 800;
+            osc.frequency.value = isFirst ? 1000 : 800;
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
             osc.connect(gain).connect(audioCtx.destination);
@@ -82,7 +68,7 @@
 
         async function startRecording() {
             if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioCtx = new AudioContext();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 2048;
@@ -91,26 +77,22 @@
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRec) {
                 recognition = new SpeechRec();
-                recognition.continuous = true;
-                recognition.interimResults = true;
-                recognition.lang = 'ko-KR';
+                recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'ko-KR';
                 recognition.onresult = (e) => { lastTranscript = e.results[e.results.length-1][0].transcript.trim().split(' ').pop(); };
             }
             bpm = document.getElementById('bpm-input').value;
             beatSec = 60 / bpm;
-            
             document.getElementById('rec-btn').style.display = 'none';
             document.getElementById('stop-btn').style.display = 'inline-block';
             
             let count = 0;
-            const preInterval = setInterval(() => {
+            const preCount = setInterval(() => {
                 playClick(count === 0);
-                document.getElementById('status-display').innerText = `READY ${count + 1}`;
+                document.getElementById('status-display').innerText = `COUNT ${count + 1}`;
                 count++;
                 if (count >= 4) {
-                    clearInterval(preInterval);
-                    isRecording = true;
-                    if(recognition) recognition.start();
+                    clearInterval(preCount);
+                    isRecording = true; if(recognition) recognition.start();
                     startTime = audioCtx.currentTime;
                     document.getElementById('status-display').innerText = "REC";
                     document.getElementById('playhead').style.display = 'block';
@@ -120,8 +102,7 @@
         }
 
         function stopRecording() {
-            isRecording = false;
-            if(recognition) recognition.stop();
+            isRecording = false; if(recognition) recognition.stop();
             document.getElementById('rec-btn').style.display = 'inline-block';
             document.getElementById('stop-btn').style.display = 'none';
             document.getElementById('playhead').style.display = 'none';
@@ -130,17 +111,16 @@
 
         function updateLoop() {
             if (!isRecording) return;
-            const totalBeats = (audioCtx.currentTime - startTime) / beatSec;
-            updatePlayheadUI(totalBeats);
-            detectPitch(totalBeats);
+            const nowBeat = (audioCtx.currentTime - startTime) / beatSec;
+            updatePlayheadUI(nowBeat);
+            detectPitch(nowBeat);
             requestAnimationFrame(updateLoop);
         }
 
         function updatePlayheadUI(beat) {
             const head = document.getElementById('playhead');
-            const mIdx = Math.floor(beat / timeSig);
-            const line = Math.floor(mIdx / 4);
-            const col = mIdx % 4;
+            const col = Math.floor(beat / timeSig) % 4;
+            const line = Math.floor(Math.floor(beat / timeSig) / 4);
             const step = window.innerWidth / 4;
             head.style.left = `${(col * step) + ((beat % timeSig) / timeSig * step)}px`;
             head.style.top = `${15 + (line * 75)}px`;
@@ -149,39 +129,95 @@
             else head.className = '';
         }
 
-        let lastNoteName = "", noteStart = 0;
+        let pitchBuffer = [], lastNoteName = "", noteStart = 0;
         function detectPitch(currentBeat) {
-            const buffer = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(buffer);
-            let freq = getPitch(buffer, audioCtx.sampleRate);
+            const buf = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buf);
+            let freq = getPitch(buf, audioCtx.sampleRate);
 
             if (freq !== -1) {
-                // 1. 목소리 음높이 보정 (한 옥타브 위로 시프트하여 높은음자리표 안착)
-                freq = freq * 2; 
-                const num = 12 * (Math.log2(freq / 440)) + 69;
+                // 옥타브 보정 (x2) 및 안정화 필터
+                freq *= 2; 
+                pitchBuffer.push(freq);
+                if (pitchBuffer.length > 3) pitchBuffer.shift();
+                const avgFreq = pitchBuffer.reduce((a,b)=>a+b)/pitchBuffer.length;
+                
+                const num = 12 * (Math.log2(avgFreq / 440)) + 69;
                 const rnd = Math.round(num);
-                let oct = Math.floor(rnd / 12) - 1;
-                const name = noteNames[rnd % 12].replace('#','') + oct;
+                const name = noteNames[rnd % 12].replace('#','') + (Math.floor(rnd / 12) - 1);
                 
                 if (lastNoteName === "") {
-                    noteStart = Math.round(currentBeat * 4) / 4;
+                    noteStart = Math.round(currentBeat * 8) / 8; // 더 정밀하게 박자 시작점 잡기
                     lastNoteName = name;
                 }
             } else if (lastNoteName !== "") {
-                const duration = Math.round(currentBeat * 4) / 4 - noteStart;
-                // 3. 플레이헤드가 지나간 후에만 그리도록 duration 보장
-                if (duration >= 0.25) {
+                const duration = (Math.round(currentBeat * 8) / 8) - noteStart;
+                if (duration >= 0.2) {
                     const key = lastNoteName.slice(0, -1);
-                    const oct = parseInt(lastNoteName.slice(-1));
-                    recordedNotes.push({ key, octave: oct, accidental: key.includes('#') ? '#' : null, startBeat: noteStart, type: duration >= 0.7 ? "q" : "8", lyric: lastTranscript });
-                    drawScore(currentBeat); // 현재 박자 전달
+                    recordedNotes.push({ 
+                        key, octave: parseInt(lastNoteName.slice(-1)), 
+                        accidental: key.includes('#') ? '#' : null, 
+                        startBeat: noteStart, 
+                        durationBeats: duration, // 2. 동기화를 위한 정확한 박자 길이 저장
+                        type: duration >= 0.6 ? "q" : "8", lyric: lastTranscript 
+                    });
+                    drawScore(currentBeat);
                     lastTranscript = "";
                 }
-                lastNoteName = "";
+                lastNoteName = ""; pitchBuffer = [];
             }
         }
 
-        // 3. 렌더링 가드: 현재 플레이헤드(currentBeat)보다 앞선 음표는 그리지 않음
+        // 2. 재생 동기화 로직 (Playhead & Sound Sync)
+        function playbackMelody() {
+            if (recordedNotes.length === 0 || isPlaying) return;
+            isPlaying = true;
+            document.getElementById('play-btn').style.display = 'none';
+            document.getElementById('stop-play-btn').style.display = 'inline-block';
+            document.getElementById('playhead').style.display = 'block';
+            const playStartTime = audioCtx.currentTime;
+            
+            recordedNotes.forEach(n => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                const freq = 440 * Math.pow(2, (((n.octave + 1) * 12 + noteNames.indexOf(n.key + (n.accidental || ""))) - 69) / 12);
+                
+                osc.frequency.value = freq;
+                // 소리 시작과 끝을 저장된 startBeat와 duration에 엄격히 맞춤
+                const start = playStartTime + (n.startBeat * beatSec);
+                const end = start + (n.durationBeats * beatSec);
+
+                gain.gain.setValueAtTime(0, start);
+                gain.gain.linearRampToValueAtTime(0.2, start + 0.05);
+                gain.gain.setValueAtTime(0.2, end - 0.05);
+                gain.gain.linearRampToValueAtTime(0, end);
+
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(start); osc.stop(end);
+                activeOscs.push(osc);
+            });
+
+            function anim() {
+                if (!isPlaying) return;
+                const elapsed = (audioCtx.currentTime - playStartTime) / beatSec;
+                updatePlayheadUI(elapsed);
+                // 마지막 음표가 끝나면 자동 정지
+                const lastN = recordedNotes[recordedNotes.length-1];
+                if (elapsed > lastN.startBeat + lastN.durationBeats + 1) stopPlayback();
+                else requestAnimationFrame(anim);
+            }
+            anim();
+        }
+
+        function stopPlayback() {
+            isPlaying = false;
+            activeOscs.forEach(o => { try { o.stop(); } catch(e){} });
+            activeOscs = [];
+            document.getElementById('play-btn').style.display = 'inline-block';
+            document.getElementById('stop-play-btn').style.display = 'none';
+            document.getElementById('playhead').style.display = 'none';
+        }
+
         function drawScore(currentBeat = 999) {
             const area = document.getElementById('score-render-area');
             area.innerHTML = "";
@@ -189,7 +225,7 @@
             const renderer = new VF.Renderer(area, VF.Renderer.Backends.SVG);
             let measures = [];
             recordedNotes.forEach(n => {
-                if (n.startBeat <= currentBeat) { // 플레이헤드가 지난 음표만 허용
+                if (n.startBeat <= currentBeat) {
                     const mIdx = Math.floor(n.startBeat / timeSig);
                     if(!measures[mIdx]) measures[mIdx] = [];
                     measures[mIdx].push(n);
@@ -198,13 +234,12 @@
             const totalM = Math.max(measures.length, 4);
             const rows = Math.ceil(totalM / 4);
             renderer.resize(window.innerWidth, rows * 75 + 30);
-            const ctx = renderer.getContext();
-            ctx.scale(0.55, 0.55);
+            const ctx = renderer.getContext(); ctx.scale(0.5, 0.5); // 악보 크기 더 최적화
 
             for (let i = 0; i < totalM; i++) {
                 const r = Math.floor(i / 4), c = i % 4;
-                const sW = (window.innerWidth / 4) / 0.55;
-                const stave = new VF.Stave(c * sW, r * (75/0.55), sW);
+                const sW = (window.innerWidth / 4) / 0.5;
+                const stave = new VF.Stave(c * sW, r * (75/0.5), sW);
                 if (c === 0) stave.addClef("treble");
                 stave.setContext(ctx).draw();
                 if (measures[i]) {
@@ -222,47 +257,6 @@
             }
         }
 
-        // 2. 재생 및 재생 정지 로직
-        function playbackMelody() {
-            if (recordedNotes.length === 0 || isPlaying) return;
-            isPlaying = true;
-            document.getElementById('play-btn').style.display = 'none';
-            document.getElementById('stop-play-btn').style.display = 'inline-block';
-            document.getElementById('playhead').style.display = 'block';
-            const playStartTime = audioCtx.currentTime;
-            
-            recordedNotes.forEach(n => {
-                const osc = audioCtx.createOscillator();
-                const gain = audioCtx.createGain();
-                const freq = 440 * Math.pow(2, (( (n.octave + 1) * 12 + noteNames.indexOf(n.key + (n.accidental || "")) ) - 69) / 12);
-                osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0.2, playStartTime + n.startBeat * beatSec);
-                gain.gain.exponentialRampToValueAtTime(0.001, playStartTime + (n.startBeat + 0.4) * beatSec);
-                osc.connect(gain).connect(audioCtx.destination);
-                osc.start(playStartTime + n.startBeat * beatSec);
-                osc.stop(playStartTime + (n.startBeat + 0.4) * beatSec);
-                playOscillators.push(osc);
-            });
-
-            function anim() {
-                if (!isPlaying) return;
-                const elapsed = (audioCtx.currentTime - playStartTime) / beatSec;
-                updatePlayheadUI(elapsed);
-                if (elapsed > recordedNotes[recordedNotes.length-1].startBeat + 2) stopPlayback();
-                else requestAnimationFrame(anim);
-            }
-            anim();
-        }
-
-        function stopPlayback() {
-            isPlaying = false;
-            playOscillators.forEach(o => { try { o.stop(); } catch(e){} });
-            playOscillators = [];
-            document.getElementById('play-btn').style.display = 'inline-block';
-            document.getElementById('stop-play-btn').style.display = 'none';
-            document.getElementById('playhead').style.display = 'none';
-        }
-
         function getPitch(buf, sampleRate) {
             let sum = 0; for (let i=0; i<buf.length; i++) sum += buf[i]*buf[i];
             if (Math.sqrt(sum/buf.length) < 0.02) return -1;
@@ -273,7 +267,7 @@
                 corr = 1 - (corr/buf.length);
                 if (corr > bestCorrelation) { bestCorrelation = corr; bestOffset = offset; }
             }
-            return (bestCorrelation > 0.85) ? sampleRate/bestOffset : -1;
+            return (bestCorrelation > 0.82) ? sampleRate/bestOffset : -1;
         }
 
         function deleteLast() { recordedNotes.pop(); drawScore(); }
